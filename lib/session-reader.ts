@@ -46,6 +46,45 @@ export function mergeSessionLists(
 }
 
 async function loadAllSessions(): Promise<SessionInfo[]> {
+  // Fork: when PI_WEB_AGENT_URL is set, sessions live on the agent machine
+  // and `SessionManager.listAll()` (which reads the local filesystem) cannot
+  // see them. Delegate to the bridge instead, then attach project info.
+  if (process.env.PI_WEB_AGENT_URL) {
+    const { RemoteAgentTransport } = await import("./remote-agent-transport");
+    const client = new RemoteAgentTransport({
+      url: process.env.PI_WEB_AGENT_URL,
+      token: process.env.PI_WEB_AGENT_TOKEN ?? "",
+      cwd: process.cwd(), // unused for list_sessions but required by transport
+      sessionId: null,
+      connectTimeoutMs: 5_000,
+      requestTimeoutMs: 30_000,
+    });
+    try {
+      await client.start();
+      const listed = await client.bridgeListSessions();
+      const pathToId = new Map<string, string>();
+      for (const s of listed) if (s.sessionId) pathToId.set(sessionPathKey(s.sessionFile), s.sessionId);
+      const sessions = listed.map((s) => {
+        if (s.sessionId) cacheSessionPath(s.sessionId, s.sessionFile);
+        return {
+          path: s.sessionFile,
+          id: s.sessionId ?? "",
+          cwd: s.cwd,
+          name: undefined,
+          created: s.startedAt ?? new Date(s.lastModifiedMs).toISOString(),
+          modified: new Date(s.lastModifiedMs).toISOString(),
+          messageCount: s.entryEstimate,
+          firstMessage: "(see remote agent)",
+          parentSessionId: undefined,
+          transient: false,
+        };
+      });
+      return attachSessionProjectInfo(sessions);
+    } finally {
+      void client.stop();
+    }
+  }
+
   const piSessions: PiSessionInfo[] = await SessionManager.listAll();
   const pathToId = new Map<string, string>();
   for (const s of piSessions) pathToId.set(sessionPathKey(s.path), s.id);
