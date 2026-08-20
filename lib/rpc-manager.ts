@@ -1586,6 +1586,46 @@ export async function startRpcSession(
   }
   const sessionCwd = sessionManager.getCwd();
   const finishStartingSession = trackStartingSession(sessionCwd);
+
+  // ---------------------------------------------------------------------
+  // Fork: remote-agent support. When PI_WEB_AGENT_URL is set, the agent
+  // runs on a separate machine via the pi-agent-bridge process and pi-web
+  // forwards every command through a TCP socket. To keep the rest of the
+  // codebase unchanged, the bridge is wrapped in an AgentSessionLike that
+  // AgentSessionWrapper can drive unmodified.
+  // ---------------------------------------------------------------------
+  const remoteUrl = process.env.PI_WEB_AGENT_URL;
+  if (remoteUrl) {
+    const token = process.env.PI_WEB_AGENT_TOKEN;
+    if (!token) throw new Error("PI_WEB_AGENT_TOKEN is required when PI_WEB_AGENT_URL is set");
+    const starting = (async () => {
+      const { RemoteAgentTransport } = await import("./remote-agent-transport");
+      const { createRemoteAgentSessionLike } = await import("./transports/remote-agent-session-like");
+      const client = new RemoteAgentTransport({
+        url: remoteUrl,
+        token,
+        cwd: sessionCwd,
+        sessionId: sessionFile ? sessionId : null,
+        toolNames: toolNames ?? null,
+      });
+      await client.start();
+      const like = createRemoteAgentSessionLike(sessionCwd, null, client);
+      const wrapper = new AgentSessionWrapper(like);
+      wrapper.start();
+      const realSessionId = wrapper.sessionId || sessionId;
+      const realSessionFile = wrapper.sessionFile || "";
+      if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
+      wrapper.onDestroy(() => registry.delete(realSessionId));
+      registry.set(realSessionId, wrapper);
+      return { session: wrapper, realSessionId };
+    })().finally(() => {
+      locks.delete(sessionId);
+      finishStartingSession();
+    });
+    locks.set(sessionId, starting);
+    return starting;
+  }
+
   const starting = (async () => {
     // Some extensions access the SDK's global theme even outside the terminal UI.
     initTheme();

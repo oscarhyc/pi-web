@@ -1,0 +1,21 @@
+{
+	"name": "pi-agent-bridge",
+	"version": "1.0.0",
+	"private": true,
+	"description": "TCP/Unix-socket bridge that exposes a pi coding-agent (pi --mode rpc) subprocess to remote pi-web frontends.",
+	"main": "bin/pi-agent-bridge.js",
+	"bin": {
+		"pi-agent-bridge": "bin/pi-agent-bridge.js"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"dependencies": {
+		"@earendil-works/pi-coding-agent": "^0.84.2"
+	},
+	"scripts": {
+		"start": "node bin/pi-agent-bridge.js",
+		"install-cli": "echo 'Bridge does not need a build step. Install @earendil-works/pi-coding-agent next to it, or use --cli <path>.'",
+		"test:smoke": "node test/smoke.js"
+	}
+}
